@@ -1,0 +1,21 @@
+## Interface: 120001
+## Title:|cffd6266cTankAggroBar|r
+## Notes: Aggro-Anzeige für Tanks (Raid & M+)
+## Notes-deDE: Aggro-Anzeige für Tanks (Raid & M+)
+## Notes-enUS: Aggro display for tanks (Raid & M+)
+## Notes-frFR: Affichage d'aggro pour tanks (Raid & M+)
+## Notes-esES: Indicador de agro para tanques (Banda y M+)
+## Notes-esMX: Indicador de agro para tanques (Banda y M+)
+## Notes-itIT: Indicatore minaccia per tank (Raid & M+)
+## Notes-ptBR: Exibição de aggro para tanks (Raid & M+)
+## Notes-ruRU: Индикатор аггро для танков (рейды и М+)
+## Notes-koKR: 탱커용 어그로 표시 (레이드 & 쐐기+)
+## Notes-zhCN: 坦克仇恨提示（团本 & 大秘境）
+## Notes-zhTW: 坦克仇恨提示（團隊 & M+）
+## Author: BloodDragon2580
+## Version: 1.0
+## IconTexture: Interface\AddOns\TankAggroBar\Media\Texture\logo
+## SavedVariables: TankAggroBarDB
+
+TankAggroBar.lua
+TankAggroBar_Options.lua
