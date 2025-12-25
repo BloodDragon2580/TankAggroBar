@@ -220,6 +220,10 @@ local defaults = {
     sound = true,
     soundChannel = "Master", -- Master / SFX / Dialog / Ambience / Music
     soundKit = SOUNDKIT.RAID_WARNING,
+
+    -- ✅ NEW: debounce for big pulls (prevents false "aggro lost" flicker)
+    loseDelay = 0.70,        -- seconds a mob must be <3 threat before we count it as lost
+    cacheTTL  = 2.00,        -- keep recently seen mobs for a short time (nameplate/offscreen flicker)
 }
 
 local function ApplyDefaults()
@@ -261,17 +265,68 @@ bar:SetScript("OnDragStop", function()
     TankAggroBarDB.y = y
 end)
 
--- Aggro Check: checks visible nameplates (retail supports up to 40)
-local function HasFullAggro()
-    for i = 1, 40 do
-        local unit = "nameplate" .. i
-        if UnitExists(unit) and UnitCanAttack("player", unit) then
-            local s = UnitThreatSituation("player", unit)
-            if s ~= 3 then
-                return false
-            end
+----------------------------------------------------------------
+-- ✅ Improved Aggro Check (debounced + cached by GUID)
+----------------------------------------------------------------
+local threatCache = {} -- [guid] = { lastSeen = time, threat = s, belowSince = time|nil }
+
+local function CleanThreatCache(now)
+    local ttl = tonumber(TankAggroBarDB.cacheTTL) or defaults.cacheTTL
+    for guid, c in pairs(threatCache) do
+        if not c.lastSeen or (now - c.lastSeen) > ttl then
+            threatCache[guid] = nil
         end
     end
+end
+
+local function TrackUnitThreat(unit, now)
+    local guid = UnitGUID(unit)
+    if not guid then return end
+
+    local s = UnitThreatSituation("player", unit) -- nil/0/1/2/3
+    local c = threatCache[guid]
+    if not c then
+        c = {}
+        threatCache[guid] = c
+    end
+
+    c.lastSeen = now
+    c.threat = s
+
+    -- If we are securely tanking (3) or we have no info yet (nil), clear "belowSince"
+    if s == 3 or s == nil then
+        c.belowSince = nil
+    else
+        -- Start timer only once when it drops below 3
+        c.belowSince = c.belowSince or now
+    end
+end
+
+-- Aggro Check: checks visible nameplates (retail supports up to 40)
+-- Debounce prevents false negatives in large pulls
+local function HasFullAggro()
+    local now = GetTime()
+
+    -- Track threat only for hostile units that are actually in combat context
+    for i = 1, 40 do
+        local unit = "nameplate" .. i
+        if UnitExists(unit) and UnitCanAttack("player", unit) and UnitAffectingCombat(unit) then
+            TrackUnitThreat(unit, now)
+        end
+    end
+
+    CleanThreatCache(now)
+
+    local loseDelay = tonumber(TankAggroBarDB.loseDelay) or defaults.loseDelay
+
+    -- Decide "lost" only if any cached mob stays <3 long enough
+    for _, c in pairs(threatCache) do
+        local s = c.threat
+        if s ~= nil and s < 3 and c.belowSince and (now - c.belowSince) >= loseDelay then
+            return false
+        end
+    end
+
     return true
 end
 
@@ -378,6 +433,10 @@ ev:SetScript("OnEvent", function(_, event)
         return
     end
 
+    if TankAggroBarDB.locked == nil then
+        TankAggroBarDB.locked = false
+    end
+
     if event == "PLAYER_REGEN_DISABLED" then
         -- entering combat
         lastAggroState = true
@@ -438,6 +497,8 @@ SlashCmdList.TANKAGGROBAR = function(msg)
         TankAggroBarDB.height = defaults.height
         TankAggroBarDB.alpha = defaults.alpha
         TankAggroBarDB.updateInterval = defaults.updateInterval
+        TankAggroBarDB.loseDelay = defaults.loseDelay
+        TankAggroBarDB.cacheTTL  = defaults.cacheTTL
         TankAggroBar_ApplySettings()
         print(prefix .. (T.PRINT_RESET or "Reset."))
         return

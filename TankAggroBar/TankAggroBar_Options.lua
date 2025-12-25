@@ -311,19 +311,29 @@ local function CreateOptionsPanel()
 
     local y = -14
 
-    local function AddCheck(text, key, onChange)
-        local cb = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
-        cb:SetPoint("TOPLEFT", sub, "BOTTOMLEFT", 0, y)
-        cb.Text:SetText(text)
+local function AddCheck(text, key, onChange)
+    local cb = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
+    cb:SetPoint("TOPLEFT", sub, "BOTTOMLEFT", 0, y)
+    cb.Text:SetText(text)
+
+    local function Sync()
         cb:SetChecked(TankAggroBarDB[key])
-        cb:SetScript("OnClick", function(self)
-            TankAggroBarDB[key] = self:GetChecked()
-            if onChange then onChange(self:GetChecked()) end
-            Apply()
-        end)
-        y = y - 28
-        return cb
     end
+
+    Sync()
+
+    cb:SetScript("OnClick", function(self)
+        TankAggroBarDB[key] = self:GetChecked()
+        if onChange then onChange(self:GetChecked()) end
+        Apply()
+    end)
+
+    -- ✅ WICHTIG: bei jedem Öffnen neu setzen
+    cb:SetScript("OnShow", Sync)
+
+    y = y - 28
+    return cb
+end
 
     local enable = AddCheck(O.ENABLE, "enabled", function(v)
         if not v and TankAggroBarFrame then
