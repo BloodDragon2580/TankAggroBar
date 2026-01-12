@@ -13,7 +13,7 @@
 ## Notes-zhCN: 坦克仇恨提示（团本 & 大秘境）
 ## Notes-zhTW: 坦克仇恨提示（團隊 & M+）
 ## Author: BloodDragon2580
-## Version: 1.1
+## Version: 1.2
 ## IconTexture: Interface\AddOns\TankAggroBar\Media\Texture\logo
 ## SavedVariables: TankAggroBarDB
 
