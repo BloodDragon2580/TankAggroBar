@@ -1,4 +1,4 @@
-## Interface: 120001
+## Interface: 120000
 ## Title:|cffd6266cTankAggroBar|r
 ## Notes: Aggro-Anzeige für Tanks (Raid & M+)
 ## Notes-deDE: Aggro-Anzeige für Tanks (Raid & M+)
@@ -13,7 +13,7 @@
 ## Notes-zhCN: 坦克仇恨提示（团本 & 大秘境）
 ## Notes-zhTW: 坦克仇恨提示（團隊 & M+）
 ## Author: BloodDragon2580
-## Version: 1.2
+## Version: 1.3
 ## IconTexture: Interface\AddOns\TankAggroBar\Media\Texture\logo
 ## SavedVariables: TankAggroBarDB
 
