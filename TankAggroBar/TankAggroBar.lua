@@ -283,13 +283,31 @@ local function TrackUnitThreat(unit, now)
     local guid = UnitGUID(unit)
     if not guid then return end
 
-    local s = UnitThreatSituation("player", unit) -- nil/0/1/2/3
-    local c = threatCache[guid]
-    if not c then
-        c = {}
-        threatCache[guid] = c
+    -- Some APIs can return "secret" values for certain unit tokens (e.g. nameplates).
+    -- Using those directly as table keys can throw "table index is secret".
+    -- We fall back to the unit token as cache key in that case.
+    local key = guid
+    if not pcall(function() return threatCache[key] end) then
+        key = unit
+    else
+        -- Ensure we always use a plain string key (avoids weird key types).
+        key = tostring(key)
     end
 
+    local s = UnitThreatSituation("player", unit) -- nil/0/1/2/3
+    local c = threatCache[key]
+    if not c then
+        c = {}
+        threatCache[key] = c
+    end
+
+    -- If the unit token is reused for a different mob, reset state.
+    if c.guid and c.guid ~= guid then
+        c.threat = nil
+        c.belowSince = nil
+    end
+
+    c.guid = guid
     c.lastSeen = now
     c.threat = s
 
