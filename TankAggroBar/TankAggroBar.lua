@@ -280,18 +280,27 @@ local function CleanThreatCache(now)
 end
 
 local function TrackUnitThreat(unit, now)
-    local guid = UnitGUID(unit)
-    if not guid then return end
+    local guidRaw = UnitGUID(unit)
+    if not guidRaw then return end
 
-    -- Some APIs can return "secret" values for certain unit tokens (e.g. nameplates).
-    -- Using those directly as table keys can throw "table index is secret".
-    -- We fall back to the unit token as cache key in that case.
-    local key = guid
+    -- WoW can return "secret" (restricted) strings for some unit tokens (often nameplates).
+    -- Any attempt to compare, concatenate, or use them as table keys can throw errors like:
+    --   "attempt to compare ... (a secret string value tainted by 'TankAggroBar')"
+    -- Convert to a safe plain string when possible; otherwise fall back to the unit token.
+    local guid
+    local guidIsSafe = pcall(function()
+        guid = tostring(guidRaw)
+    end)
+    if not guidIsSafe then
+        guid = nil
+    end
+
+    -- Prefer GUID cache keys when we have a safe GUID, otherwise use the unit token.
+    local key = guid or unit
+
+    -- Even after tostring(), be defensive: some restricted values can still slip through.
     if not pcall(function() return threatCache[key] end) then
         key = unit
-    else
-        -- Ensure we always use a plain string key (avoids weird key types).
-        key = tostring(key)
     end
 
     local s = UnitThreatSituation("player", unit) -- nil/0/1/2/3
@@ -302,7 +311,7 @@ local function TrackUnitThreat(unit, now)
     end
 
     -- If the unit token is reused for a different mob, reset state.
-    if c.guid and c.guid ~= guid then
+    if c.guid and guid and c.guid ~= guid then
         c.threat = nil
         c.belowSince = nil
     end
