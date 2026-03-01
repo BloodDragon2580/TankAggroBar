@@ -283,22 +283,34 @@ local function TrackUnitThreat(unit, now)
     local guidRaw = UnitGUID(unit)
     if not guidRaw then return end
 
-    -- WoW can return "secret" (restricted) strings for some unit tokens (often nameplates).
+    -- WoW can return "secret" (restricted) strings for some unit tokens (often nameplates / Delves).
     -- Any attempt to compare, concatenate, or use them as table keys can throw errors like:
     --   "attempt to compare ... (a secret string value tainted by 'TankAggroBar')"
-    -- Convert to a safe plain string when possible; otherwise fall back to the unit token.
+    --
+    -- We only keep a GUID if it is a *safe* plain Lua string. Otherwise we fall back to the unit token.
     local guid
-    local guidIsSafe = pcall(function()
-        guid = tostring(guidRaw)
-    end)
-    if not guidIsSafe then
-        guid = nil
+
+    -- If Blizzard exposes issecurevalue(), use it to detect restricted values early.
+    if type(issecurevalue) == "function" and issecurevalue(guidRaw) then
+        guidRaw = nil
+    end
+
+    if guidRaw then
+        local ok, str = pcall(tostring, guidRaw)
+        if ok then
+            -- tostring() can still yield restricted values in some edge cases; guard again.
+            if type(issecurevalue) == "function" and issecurevalue(str) then
+                guid = nil
+            else
+                guid = str
+            end
+        end
     end
 
     -- Prefer GUID cache keys when we have a safe GUID, otherwise use the unit token.
     local key = guid or unit
 
-    -- Even after tostring(), be defensive: some restricted values can still slip through.
+    -- Be defensive: indexing a table with a restricted key can error.
     if not pcall(function() return threatCache[key] end) then
         key = unit
     end
@@ -311,9 +323,17 @@ local function TrackUnitThreat(unit, now)
     end
 
     -- If the unit token is reused for a different mob, reset state.
-    if c.guid and guid and c.guid ~= guid then
-        c.threat = nil
-        c.belowSince = nil
+    if c.guid and guid then
+        -- c.guid may be a previously stored restricted value (from older versions / edge cases).
+        if type(issecurevalue) == "function" and issecurevalue(c.guid) then
+            c.guid = nil
+        else
+            local ok, different = pcall(function() return c.guid ~= guid end)
+            if ok and different then
+                c.threat = nil
+                c.belowSince = nil
+            end
+        end
     end
 
     c.guid = guid
