@@ -1,4 +1,4 @@
--- TankAggroBar.lua (Retail / TWW)
+-- TankAggroBar.lua (Retail / Midnight 12.x)
 
 -- SavedVariables
 TankAggroBarDB = TankAggroBarDB or {}
@@ -7,6 +7,7 @@ TankAggroBarDB = TankAggroBarDB or {}
 local L = {
     enUS = {
         OK = "Aggro OK",
+        UNKNOWN = "AGGRO UNKNOWN",
         LOST = "AGGRO LOST",
         ADDON = "TankAggroBar",
         CMD = "Commands",
@@ -24,6 +25,7 @@ local L = {
     },
     deDE = {
         OK = "Aggro OK",
+        UNKNOWN = "AGGRO UNBEKANNT",
         LOST = "AGGRO VERLOREN",
         ADDON = "TankAggroBar",
         CMD = "Befehle",
@@ -41,6 +43,7 @@ local L = {
     },
     frFR = {
         OK = "Aggro OK",
+        UNKNOWN = "AGGRO INCONNUE",
         LOST = "AGGRO PERDUE",
         ADDON = "TankAggroBar",
         CMD = "Commandes",
@@ -58,6 +61,7 @@ local L = {
     },
     esES = {
         OK = "Aggro OK",
+        UNKNOWN = "AGRO DESCONOCIDO",
         LOST = "AGGRO PERDIDA",
         ADDON = "TankAggroBar",
         CMD = "Comandos",
@@ -75,6 +79,7 @@ local L = {
     },
     esMX = {
         OK = "Aggro OK",
+        UNKNOWN = "AGRO DESCONOCIDO",
         LOST = "AGGRO PERDIDA",
         ADDON = "TankAggroBar",
         CMD = "Comandos",
@@ -92,6 +97,7 @@ local L = {
     },
     itIT = {
         OK = "Aggro OK",
+        UNKNOWN = "AGGRO SCONOSCIUTA",
         LOST = "AGGRO PERSA",
         ADDON = "TankAggroBar",
         CMD = "Comandi",
@@ -109,6 +115,7 @@ local L = {
     },
     ptBR = {
         OK = "Aggro OK",
+        UNKNOWN = "AGGRO DESCONHECIDO",
         LOST = "AGGRO PERDIDA",
         ADDON = "TankAggroBar",
         CMD = "Comandos",
@@ -126,6 +133,7 @@ local L = {
     },
     ruRU = {
         OK = "Aggro OK",
+        UNKNOWN = "АГРО НЕИЗВЕСТНО",
         LOST = "ПОТЕРЯ АГГРО",
         ADDON = "TankAggroBar",
         CMD = "Команды",
@@ -143,6 +151,7 @@ local L = {
     },
     koKR = {
         OK = "어그로 유지",
+        UNKNOWN = "어그로 확인 불가",
         LOST = "어그로 상실",
         ADDON = "TankAggroBar",
         CMD = "명령어",
@@ -160,6 +169,7 @@ local L = {
     },
     zhCN = {
         OK = "仇恨正常",
+        UNKNOWN = "仇恨状态未知",
         LOST = "仇恨丢失",
         ADDON = "TankAggroBar",
         CMD = "命令",
@@ -177,6 +187,7 @@ local L = {
     },
     zhTW = {
         OK = "仇恨正常",
+        UNKNOWN = "仇恨狀態未知",
         LOST = "仇恨遺失",
         ADDON = "TankAggroBar",
         CMD = "指令",
@@ -266,115 +277,107 @@ bar:SetScript("OnDragStop", function()
 end)
 
 ----------------------------------------------------------------
--- ✅ Improved Aggro Check (debounced + cached by GUID)
+-- Threat tracking (Midnight 12.x / secret-value safe)
 ----------------------------------------------------------------
-local threatCache = {} -- [guid] = { lastSeen = time, threat = s, belowSince = time|nil }
+-- "issecurevalue" checks taint, NOT secrecy. Only issecretvalue can
+-- tell us whether a WoW API result may be inspected by addon Lua.
+local secretCheck = issecretvalue
+local function IsSecret(value)
+    return secretCheck and secretCheck(value) or false
+end
+
+local threatCache = {} -- [safe GUID or unit token] = {guid, lastSeen, threat, belowSince}
 
 local function CleanThreatCache(now)
     local ttl = tonumber(TankAggroBarDB.cacheTTL) or defaults.cacheTTL
-    for guid, c in pairs(threatCache) do
-        if not c.lastSeen or (now - c.lastSeen) > ttl then
-            threatCache[guid] = nil
+    for key, entry in pairs(threatCache) do
+        if not entry.lastSeen or (now - entry.lastSeen) > ttl then
+            threatCache[key] = nil
         end
     end
 end
 
+-- Returns false if WoW deliberately hides the threat state. Such results
+-- must never be compared, converted, or used to trigger a sound.
 local function TrackUnitThreat(unit, now)
-    local guidRaw = UnitGUID(unit)
-    if not guidRaw then return end
+    local status = UnitThreatSituation("player", unit)
+    if IsSecret(status) then
+        return false
+    end
 
-    -- WoW can return "secret" (restricted) strings for some unit tokens (often nameplates / Delves).
-    -- Any attempt to compare, concatenate, or use them as table keys can throw errors like:
-    --   "attempt to compare ... (a secret string value tainted by 'TankAggroBar')"
-    --
-    -- We only keep a GUID if it is a *safe* plain Lua string. Otherwise we fall back to the unit token.
+    -- UnitGUID(nameplate) can itself be secret in Midnight. Never use a
+    -- restricted GUID as a table key or run tostring() on it.
+    local rawGuid = UnitGUID(unit)
     local guid
-
-    -- If Blizzard exposes issecurevalue(), use it to detect restricted values early.
-    if type(issecurevalue) == "function" and issecurevalue(guidRaw) then
-        guidRaw = nil
+    if not IsSecret(rawGuid) and type(rawGuid) == "string" then
+        guid = rawGuid
     end
 
-    if guidRaw then
-        local ok, str = pcall(tostring, guidRaw)
-        if ok then
-            -- tostring() can still yield restricted values in some edge cases; guard again.
-            if type(issecurevalue) == "function" and issecurevalue(str) then
-                guid = nil
-            else
-                guid = str
-            end
-        end
+    local key = guid or unit -- unit is built locally, never a secret
+    local entry = threatCache[key]
+    if not entry then
+        entry = {}
+        threatCache[key] = entry
     end
 
-    -- Prefer GUID cache keys when we have a safe GUID, otherwise use the unit token.
-    local key = guid or unit
-
-    -- Be defensive: indexing a table with a restricted key can error.
-    if not pcall(function() return threatCache[key] end) then
-        key = unit
+    -- A nameplate token may be reused for a different mob. Reset a reused
+    -- entry if the old and new GUIDs are both safe and disagree.
+    if entry.guid and guid and entry.guid ~= guid then
+        entry.threat = nil
+        entry.belowSince = nil
     end
 
-    local s = UnitThreatSituation("player", unit) -- nil/0/1/2/3
-    local c = threatCache[key]
-    if not c then
-        c = {}
-        threatCache[key] = c
-    end
+    entry.guid = guid
+    entry.lastSeen = now
+    entry.threat = status
 
-    -- If the unit token is reused for a different mob, reset state.
-    if c.guid and guid then
-        -- c.guid may be a previously stored restricted value (from older versions / edge cases).
-        if type(issecurevalue) == "function" and issecurevalue(c.guid) then
-            c.guid = nil
-        else
-            local ok, different = pcall(function() return c.guid ~= guid end)
-            if ok and different then
-                c.threat = nil
-                c.belowSince = nil
-            end
-        end
-    end
-
-    c.guid = guid
-    c.lastSeen = now
-    c.threat = s
-
-    -- If we are securely tanking (3) or we have no info yet (nil), clear "belowSince"
-    if s == 3 or s == nil then
-        c.belowSince = nil
+    if status == nil or status == 3 then
+        entry.belowSince = nil
     else
-        -- Start timer only once when it drops below 3
-        c.belowSince = c.belowSince or now
+        entry.belowSince = entry.belowSince or now
     end
+
+    return true
 end
 
--- Aggro Check: checks visible nameplates (retail supports up to 40)
--- Debounce prevents false negatives in large pulls
+-- Returns (fullAggro, hasRestrictedData). Restricted data is UNKNOWN,
+-- not positive proof of either "aggro OK" or "aggro lost".
 local function HasFullAggro()
     local now = GetTime()
+    local unknown = false
 
-    -- Track threat only for hostile units that are actually in combat context
     for i = 1, 40 do
         local unit = "nameplate" .. i
-        if UnitExists(unit) and UnitCanAttack("player", unit) and UnitAffectingCombat(unit) then
-            TrackUnitThreat(unit, now)
+        local exists = UnitExists(unit)
+        if IsSecret(exists) then
+            unknown = true
+        elseif exists then
+            local hostile = UnitCanAttack("player", unit)
+            if IsSecret(hostile) then
+                unknown = true
+            elseif hostile then
+                local inCombat = UnitAffectingCombat(unit)
+                if IsSecret(inCombat) then
+                    unknown = true
+                elseif inCombat and not TrackUnitThreat(unit, now) then
+                    unknown = true
+                end
+            end
         end
     end
 
     CleanThreatCache(now)
-
     local loseDelay = tonumber(TankAggroBarDB.loseDelay) or defaults.loseDelay
 
-    -- Decide "lost" only if any cached mob stays <3 long enough
-    for _, c in pairs(threatCache) do
-        local s = c.threat
-        if s ~= nil and s < 3 and c.belowSince and (now - c.belowSince) >= loseDelay then
-            return false
+    for _, entry in pairs(threatCache) do
+        -- "threat" is only cached after passing IsSecret, so comparisons are safe.
+        local status = entry.threat
+        if status ~= nil and status < 3 and entry.belowSince and (now - entry.belowSince) >= loseDelay then
+            return false, unknown
         end
     end
 
-    return true
+    return true, unknown
 end
 
 local function PlayAggroLostSound()
@@ -421,21 +424,25 @@ local function UpdateBar()
 
     bar:Show()
 
-    local hasAggro = HasFullAggro()
+    local hasAggro, unknown = HasFullAggro()
 
-    if hasAggro then
-        bar:SetBackdropColor(0, 0.80, 0, TankAggroBarDB.alpha or 0.90)
-        text:SetText(T.OK)
-    else
+    if not hasAggro then
         bar:SetBackdropColor(0.80, 0, 0, TankAggroBarDB.alpha or 0.90)
         text:SetText(T.LOST)
-
         if lastAggroState then
             PlayAggroLostSound()
         end
+        lastAggroState = false
+    elseif unknown then
+        -- Do not report confirmed aggro or fire alerts based on secret data.
+        bar:SetBackdropColor(0.85, 0.60, 0, TankAggroBarDB.alpha or 0.90)
+        text:SetText(T.UNKNOWN or "AGGRO ?")
+        lastAggroState = true
+    else
+        bar:SetBackdropColor(0, 0.80, 0, TankAggroBarDB.alpha or 0.90)
+        text:SetText(T.OK)
+        lastAggroState = true
     end
-
-    lastAggroState = hasAggro
 end
 
 local function StartTicker()
@@ -494,6 +501,7 @@ ev:SetScript("OnEvent", function(_, event)
 
     if event == "PLAYER_REGEN_ENABLED" then
         -- leaving combat
+        wipe(threatCache)
         lastAggroState = true
         UpdateBar()
         return
@@ -501,6 +509,7 @@ ev:SetScript("OnEvent", function(_, event)
 
     if event == "PLAYER_ENTERING_WORLD" then
         -- safety on reloads / zoning
+        wipe(threatCache)
         lastAggroState = true
         StopTicker()
         StartTicker()
