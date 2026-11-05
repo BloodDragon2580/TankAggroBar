@@ -262,6 +262,7 @@ text:SetPoint("CENTER")
 
 -- Dragging
 bar:SetMovable(true)
+bar:SetClampedToScreen(true)
 bar:EnableMouse(true)
 bar:RegisterForDrag("LeftButton")
 bar:SetScript("OnDragStart", function()
@@ -269,11 +270,22 @@ bar:SetScript("OnDragStart", function()
         bar:StartMoving()
     end
 end)
-bar:SetScript("OnDragStop", function()
-    bar:StopMovingOrSizing()
-    local _, _, _, x, y = bar:GetPoint()
-    TankAggroBarDB.x = x
-    TankAggroBarDB.y = y
+bar:SetScript("OnDragStop", function(self)
+    self:StopMovingOrSizing()
+    -- Dragging can change the anchor point, so do not interpret
+    -- GetPoint() offsets as if they were still relative to CENTER.
+    local cx, cy = self:GetCenter()
+    local pcx, pcy = UIParent:GetCenter()
+    local parentScale, frameScale = UIParent:GetEffectiveScale(), self:GetEffectiveScale()
+    if not (cx and cy and pcx and pcy and parentScale and parentScale > 0
+        and frameScale and frameScale > 0) then return end
+
+    local x = cx * frameScale / parentScale - pcx
+    local y = cy * frameScale / parentScale - pcy
+    -- Canonical CENTER anchor survives changing options and relogging.
+    self:ClearAllPoints()
+    self:SetPoint("CENTER", UIParent, "CENTER", x, y)
+    TankAggroBarDB.x, TankAggroBarDB.y = x, y
 end)
 
 ----------------------------------------------------------------
@@ -399,6 +411,15 @@ local function StopTicker()
     end
 end
 
+-- The combat event is authoritative even if lockdown has not flipped yet.
+-- This also avoids missing visibility on the first frame of a fight.
+local combatEventActive = false
+local function PlayerInCombat()
+    if combatEventActive or InCombatLockdown() then return true end
+    local flag = UnitAffectingCombat("player")
+    return not IsSecret(flag) and flag == true
+end
+
 local function ShouldShow()
     if not TankAggroBarDB.enabled then
         return false
@@ -409,7 +430,7 @@ local function ShouldShow()
     end
 
     if TankAggroBarDB.showOnlyInCombat then
-        return InCombatLockdown()
+        return PlayerInCombat()
     end
 
     return true
@@ -481,6 +502,7 @@ ev:RegisterEvent("PLAYER_LOGOUT")
 ev:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_LOGIN" then
         ApplyDefaults()
+        combatEventActive = InCombatLockdown()
         T = GetT()
 
         TankAggroBar_ApplySettings()
@@ -492,7 +514,8 @@ ev:SetScript("OnEvent", function(_, event)
     end
 
     if event == "PLAYER_REGEN_DISABLED" then
-        -- entering combat
+        -- Entering combat: update before the next scheduled ticker tick.
+        combatEventActive = true
         lastAggroState = true
         StartTicker()
         UpdateBar()
@@ -500,7 +523,7 @@ ev:SetScript("OnEvent", function(_, event)
     end
 
     if event == "PLAYER_REGEN_ENABLED" then
-        -- leaving combat
+        combatEventActive = false
         wipe(threatCache)
         lastAggroState = true
         UpdateBar()
@@ -508,7 +531,8 @@ ev:SetScript("OnEvent", function(_, event)
     end
 
     if event == "PLAYER_ENTERING_WORLD" then
-        -- safety on reloads / zoning
+        -- Safety on reloads/zoning, also when entering an instance in combat.
+        combatEventActive = InCombatLockdown()
         wipe(threatCache)
         lastAggroState = true
         StopTicker()

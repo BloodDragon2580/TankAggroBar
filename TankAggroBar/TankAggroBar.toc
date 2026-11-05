@@ -8,12 +8,12 @@
 ## Notes-esMX: Indicador de agro para tanques (Banda y M+)
 ## Notes-itIT: Indicatore minaccia per tank (Raid & M+)
 ## Notes-ptBR: Exibição de aggro para tanks (Raid & M+)
-## Notes-ruRU: Индикатор аггро для танков (рейды и М+)
+## Notes-ruRU: Индикатор аггро для танков (рейды и M+)
 ## Notes-koKR: 탱커용 어그로 표시 (레이드 & 쐐기+)
 ## Notes-zhCN: 坦克仇恨提示（团本 & 大秘境）
 ## Notes-zhTW: 坦克仇恨提示（團隊 & M+）
 ## Author: BloodDragon2580
-## Version: 2.7
+## Version: 2.8
 ## IconTexture: Interface\AddOns\TankAggroBar\Media\Texture\logo
 ## SavedVariables: TankAggroBarDB
 
